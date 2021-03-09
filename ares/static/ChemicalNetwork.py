@@ -18,7 +18,7 @@ from scipy.special import erf, gamma, hyp1f1
 from ..util.Warnings import solver_error
 from ..physics.RateCoefficients import RateCoefficients
 from ..physics.Constants import k_B, sigma_T, m_e, c, s_per_myr, erg_per_ev, h, \
-    m_H, m_p, ev_per_g, ev_per_cminv, ev_per_K, ev_per_hz
+    m_H, m_p, m_HeII, ev_per_g, ev_per_cminv, ev_per_K, ev_per_hz
         
 rad_const = (8. * sigma_T / 3. / m_e / c)
         
@@ -285,13 +285,18 @@ class ChemicalNetwork(object):
 
         if self.include_dm and not self.isothermal:
             Tk, Tchi, Vchib = x['Tk'], x['Tchi'], x['Vchib']
-            dTk_dt, dTchi_dt, dVchib_dt = self.dm_heating(z, Tk, Tchi, Vchib)
+            # dTk_dt, dTchi_dt, dVchib_dt = self.dm_heating(z, Tk, Tchi, Vchib)
+            dTk_dt, dTchi_dt, dVchib_dt = self.new_dm_heating(z, x, n_H, n_He)
 
-            H = self.cosm.HubbleParameter(z)
-            dm_cooling = 2*H*x['Tchi']
-            dqdt['Tchi'] = -dm_cooling + dTchi_dt
+            # H = self.cosm.HubbleParameter(z)
+            # dm_cooling = 2*H*x['Tchi']
+            # dqdt['Tchi'] = -dm_cooling + dTchi_dt
+            # dqdt['Tk'] += dTk_dt
+            # dqdt['Vchib'] = -H*Vchib + dVchib_dt
+
+            dqdt['Tchi'] = dTchi_dt
             dqdt['Tk'] += dTk_dt
-            dqdt['Vchib'] = -H*Vchib + dVchib_dt
+            dqdt['Vchib'] = dVchib_dt
 
             if self.isothermal:
                 dqdt['Tchi'] = 0
@@ -730,6 +735,7 @@ class ChemicalNetwork(object):
         r = Vchib/uth
         F = erf(r / np.sqrt(2)) - np.sqrt(2 / np.pi) * np.exp(-r ** 2 / 2) * r
         drag = rho_m * sig * F / (mb + mchi) / Vchib ** 2
+
         if Vchib == 0:
             drag = 0
 
@@ -758,3 +764,129 @@ class ChemicalNetwork(object):
 
         return dTb_dt, dTchi_dt, dVchib_dt
 
+    def new_dm_heating(self, z, x, n_H, n_He):
+
+        """
+        Dark Matter heating differential equations.
+        Equations 1 - 4 of Kovetz et al. 2018
+
+        Parameters
+        ------------
+        z : float
+            redshift.
+        x : 
+
+        """
+        Tb_, Tchi_, Vchib_ = x['Tk'], x['Tchi'], x['Vchib']  
+        n_e = x['e'] * n_H
+
+        xe = x['e'] # electron fraction 
+        x_h2 =  x['h_2'] # ionized hydrogen fraction 
+        # x_he2 = x['he_2'] # singly ionized helium fraction
+        # x_he3 = x['he_3'] # doubly ionized helium fraction
+
+        # Putting everything in natural units with c=h=kb=1...
+        Tb = Tb_ * ev_per_K
+        Tchi = Tchi_ * ev_per_K
+        Vchib = Vchib_ / c
+
+        # Threshold velocity so it doesn't go negative
+        if Vchib < 1e-8:
+            Vchib = 0
+
+        mb = self.cosm.g_per_b * ev_per_g  # Baryon mass [eV]
+        mchi = self.cosm.m_dmeff * 1e9  # DM mass [eV]
+        mp = m_p * ev_per_g 
+        me = m_e * ev_per_g
+        # mHe2 = m_HeII * ev_per_g
+        # mHe3 = (m_HeII- m_e) * ev_per_g
+        sig = self.cosm.sigma_dmeff / ev_per_cminv**2  # Cross section [eV^-2]
+        npow = self.cosm.npow_dmeff
+        fchi = 1 # Fraction of interacting DM (1 for now)
+        H = self.cosm.HubbleParameter(z)
+
+        # Conversion from cgs density to eV^4
+        rho_to_ev = ev_per_g * ev_per_cminv**3
+        rho_chi = self.cosm.MeanDarkMatterDensity(z) * rho_to_ev
+        # rho_m = self.cosm.MeanMatterDensity(z) * rho_to_ev
+        rho_b = self.cosm.MeanBaryonDensity(z) * rho_to_ev
+        rho_h = self.cosm.MeanHydrogenNumberDensity(z) * m_H * rho_to_ev # Mean hydrogen energy density 
+        # rho_he = self.cosm.MeanHeliumNumberDensity(z) * rho_b # Mean helium energy density
+        rho_e = n_e * me * ev_per_cminv**3
+
+        # rho_e = _ # Free electron energy density 
+        rho_h2 = x_h2 * rho_h # ionized hydrogen energy density
+        # rho_he3 = x_he3 * rho_he # singly ionized helium energy density
+        # rho_he4 = x_he4 * rho_he # doubly ionized hydrogen energy denisty
+        # print("mchi = {}, mb = {}, mp = {}, me = {}".format(mchi,mb,mp,me))
+        # print("rho_chi = {}, rho_b = {}, rho_h = {}, rho_e = {}, rho_h2 = {}".format(rho_chi, rho_b, rho_h, rho_e, rho_h2))
+        uth = np.sqrt(Tb / mb + Tchi / mchi)
+        r = Vchib/uth
+        F = erf(r / np.sqrt(2)) - np.sqrt(2 / np.pi) * np.exp(-r ** 2 / 2) * r
+        
+        # drag = -H * Vchib - (1 + fchi * rho_chi / rho_b) * sig * F * (rho_h2 / (mp + mchi) 
+        # + rho_he2 / (mHe2 + mchi) + 2 * rho_he3 / (mHe3 + mchi)) / Vchib ** 2  
+        
+        # print('rho_b = {}, rho_H = {}, m_H * n_H = {}, vs rho_h2 = {}'.format(rho_b, rho_h, m_H*n_H * ev_per_g * ev_per_cminv**3, rho_h2))       
+
+        if Vchib == 0:
+            print('Vchib is 0')
+            dVchib_dt_ = 0
+
+            dTchi_dt_ = 2.0 / 3.0 * mchi * sig / uth**3 * (rho_h2 / (mchi + mp)**2  \
+                * np.sqrt(2/np.pi) * (Tb - Tchi) * np.exp(-r**2 / 2) + rho_e/(mchi+me)**2 \
+                * (np.sqrt(2/np.pi) * (Tb - Tchi) * np.exp(-r**2 / 2)))
+
+            # dTchi_dt_ = (2.0 / 3.0 * mchi * sig / uth**3 * rho_h2 / (mchi + mp)**2  
+            #     * (np.sqrt(2/np.pi) * (Tb - Tchi) * np.exp(-r**2 / 2)))   
+
+        
+            dTb_dt_ = 2.0 / 3.0 * fchi * rho_chi * sig / ((n_H + n_He + n_e)* ev_per_cminv**3) / uth**3 \
+                * (rho_h2 / (mchi + mp)**2 * (np.sqrt(2/np.pi) * (Tchi - Tb) * np.exp(-r**2 / 2)) \
+                + rho_e / (mchi + me)**2 * (np.sqrt(2/np.pi) * (Tchi - Tb) * np.exp(-r**2 / 2)))
+
+            # dTb_dt_ = -2 * H * Tb + (2.0 / 3.0 * fchi * rho_chi * sig / ((n_H + n_He + n_e)* ev_per_cminv**3) / uth**3 
+            #     * (rho_h2 / (mchi + mp)**2 * (np.sqrt(2/np.pi) * (Tchi - Tb) * np.exp(-r**2 / 2))))
+            
+        else:
+            dVchib_dt_ = -(1 + fchi * rho_chi / rho_b) * sig * F * (rho_h2 / (mp + mchi) + rho_e / (me+mchi) ) / Vchib ** 2  
+            # dVchib_dt_ = -(1 + fchi * rho_chi / rho_b) * sig * F * (rho_h2 / (mp + mchi) ) / Vchib ** 2  
+
+
+            dTchi_dt_ = 2.0 / 3.0 * mchi * sig / uth**3 * ((rho_h2 / (mchi + mp)**2  \
+                * (np.sqrt(2/np.pi) * (Tb - Tchi) * np.exp(-r**2 / 2) \
+                + mp * Vchib**2 / r**3 * F)) + (rho_e/(mchi+me)**2 \
+                * (np.sqrt(2/np.pi) * (Tb - Tchi) * np.exp(-r**2 / 2) \
+                + me * Vchib**2 / r**3 * F)))
+
+            # dTchi_dt_ = (2.0 / 3.0 * mchi * sig / uth**3 * rho_h2 / (mchi + mp)**2  
+            #     * (np.sqrt(2/np.pi) * (Tb - Tchi) * np.exp(-r**2 / 2) 
+            #     + mp * Vchib**2 / r**3 * F))
+
+            dTb_dt_ = 2.0 / 3.0 * fchi * rho_chi * sig / ((n_H + n_He + n_e)* ev_per_cminv**3) / uth**3 \
+                * ((rho_h2 / (mchi + mp)**2 * (np.sqrt(2/np.pi) * (Tchi - Tb) * np.exp(-r**2 / 2) \
+                + mchi * Vchib**2 / r**3 * F)) + (rho_e / (mchi + me)**2 \
+                * (np.sqrt(2/np.pi) * (Tchi - Tb) * np.exp(-r**2 / 2) \
+                + mchi * Vchib**2 / r**3 * F)))
+        
+            # dTb_dt_ = (2.0 / 3.0 * fchi * rho_chi * sig / ((n_H + n_He + n_e)* ev_per_cminv**3) / uth**3 
+            #     * (rho_h2 / (mchi + mp)**2 * (np.sqrt(2/np.pi) * (Tchi - Tb) * np.exp(-r**2 / 2) 
+            #     + mchi * Vchib**2 / r**3 * F)))
+
+        # dxe_dz = C/(1+z)/H*(alpha * xe**2 * n_H - beta * (1-xe) * np.exp(-h * eta / kb / Tcmb) )
+
+        # Converts back to cgs
+        dTchi_dt = -2 * H * Tchi_ + dTchi_dt_ / ev_per_K / ev_per_hz  # [K/s]
+        dTb_dt = dTb_dt_ / ev_per_K / ev_per_hz  # [K/s]
+        dVchib_dt = -H * Vchib_ + dVchib_dt_ * c / ev_per_hz  # [(cm/s) / s]
+
+        if np.isnan(np.array([dTb_dt, dTchi_dt, dVchib_dt])).any():
+            # import pdb
+            # pdb.set_trace()
+            # print("NAN")
+            print("dTb_dt is nan: " + str(np.isnan(dTb_dt)))
+            print("dTchi_dt is nan: "+ str(np.isnan(dTchi_dt)))
+            print("dVchi_dt is nan: "+ str(np.isnan(dVchib_dt)))
+
+
+        return dTb_dt, dTchi_dt, dVchib_dt

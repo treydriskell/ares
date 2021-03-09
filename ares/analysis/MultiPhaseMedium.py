@@ -99,15 +99,15 @@ class MultiPhaseMedium(object):
         # Read output of a simulation from disk
         elif isinstance(data, basestring):
             self.prefix = data
-            self._load_data(data)
+            self._load_data(data, suffix) # TREY: temp fix 
 
         self.kwargs = kwargs
 
-    def _load_data(self, data):
+    def _load_data(self, data, suffix):
         if os.path.exists('{!s}.history.pkl'.format(data)):
             history = self._load_pkl(data)
         else:
-            history = self._load_txt(data, suffix)
+            history = self._load_txt(data, suffix)  # TREY: temp fix 
 
         self._load_pf(data)
         self.history = history
