@@ -18,6 +18,7 @@ from .Constants import c, G, km_per_mpc, m_H, m_He, sigma_SB, g_per_msun, \
 try:
     import pyccl
 except ImportError:
+    raise
     pass
 
 class CosmologyCCL(CosmologyARES):
@@ -29,34 +30,57 @@ class CosmologyCCL(CosmologyARES):
     @property
     def _ccl_instance(self):
         if not hasattr(self, '_ccl_instance_'):
-            cosmo = pyccl.Cosmology(Omega_c=self.omega_cdm_0,
-                Omega_b=self.omega_b_0, h=self.h70, n_s=self.primordial_index,
-                sigma8=self.sigma_8,
-                transfer_function='boltzmann_camb')
+            ccl_kwargs = dict(Omega_c=self.omega_cdm_0,
+                                Omega_b=self.omega_b_0, h=self.h70, 
+                                n_s=self.primordial_index,
+                                sigma8=self.sigma_8,)
+
+
+            if self.pf['cosmology_helper'] is None:
+                cosmo = pyccl.Cosmology(**ccl_kwargs, transfer_function='boltzmann_camb')
 
             # Set background quantities in CCL using class arrays, if cosmology_helper is passed
-            if self.pf['cosmology_helper'] is not None:
+            # CCL commit 593ed60c required to make this work.
+            else:
                 cl = self.pf['cosmology_helper']
+                bg = cl.get_background()
 
-                z_bg = np.concatenate((np.linspace(0, 10, 100), np.geomspace(10, 1500, 50)))
-                z_pk = np.arange(self.pf['hmf_zmin'], self.pf['hmf_zmax'], self.pf['hmf_dz'])
+                a_bg = 1/(1+bg['z'])
+                # Distances
+                chi = bg['comov. dist.']
+                # Expansion rate
+                h_over_h0 = bg['H [1/Mpc]']
+                h_over_h0 /= h_over_h0[-1]
+
+                # Growth
+                growth_factor = bg['gr.fac. D']
+                growth_rate = bg['gr.fac. f']
+
+
+                # Power spectra
                 k_arr = np.logspace(-5, np.log10(self.pf['kmax']), 1000)
+                nk = len(k_arr)
 
-                a = 1/(1 + z_bg[::-1])
-                distance = cl.z_of_r(z_bg)
-                distance = np.flip(distance)
+                z_pk = np.arange(self.pf['hmf_zmin'], self.pf['hmf_zmax'], self.pf['hmf_dz'])
+                a_arr = 1 / (1 + z_pk[::-1])
 
-                hubble_z = np.array([cl.Hubble(z) for z in z_bg])
-                H0 = hubble_z[0]
-                E_of_z = hubble_z / H0
-                E_of_z = np.flip(E_of_z)
+                # Linear
+                pkln = np.array([[cl.pk_lin(k, 1./a-1)
+                                  for k in k_arr]
+                                 for a in a_arr])
+                # non-linear
+                pknl = np.array([[cl.pk(k, 1./a-1)
+                                  for k in k_arr]
+                                 for a in a_arr])
 
-                n_zk = len(z_pk)
-                n_k = len(k_arr)
-                class_pk_lin = cl.get_pk_array(k_arr, z_pk, n_k, n_zk, False).reshape([n_zk, n_k])[::-1, :]
-
-                cosmo._set_background_from_arrays(a_array=a, chi_array=distance, hoh0_array=E_of_z)
-                cosmo._set_linear_power_from_arrays(1./(1 + z_pk[::-1]), k_arr, class_pk_lin)
+                cosmo = pyccl.CosmologyCalculator(**ccl_kwargs,
+                                    background={'a': a_bg, 'chi': chi, 'h_over_h0': h_over_h0},
+                                    growth={'a': a_bg, 'growth_factor': growth_factor,
+                                            'growth_rate': growth_rate},
+                                    pk_linear={'a': a_arr, 'k': k_arr,
+                                               'delta_matter:delta_matter': pkln},
+                                    pk_nonlin={'a': a_arr, 'k': k_arr,
+                                               'delta_matter:delta_matter': pknl})
 
                 # # erase classy object for serialization purposes?
                 # self.pf['cosmology_helper'] = 'used'
