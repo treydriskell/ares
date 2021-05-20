@@ -399,7 +399,7 @@ class Grid(object):
     def set_physics(self, isothermal=False, compton_scattering=False,
         secondary_ionization=0, expansion=False, recombination='B',
         clumping_factor=1.0, collisional_ionization=True, exotic_heating=False, 
-        include_dm = False, **kwargs):
+        include_dm = False, scattering_off_neutrals=True, **kwargs):
         self._isothermal = isothermal
         self._compton_scattering = compton_scattering
         self._secondary_ionization = secondary_ionization
@@ -426,7 +426,7 @@ class Grid(object):
                 self._exotic_func = self.pf['exotic_heating_func']
                 
         if self._include_dm:
-            self._scattering_off_neutrals = kwargs['scattering_off_neutrals']
+            self._scattering_off_neutrals = scattering_off_neutrals            
             
             # Set Jacobian element?    
 

@@ -40,6 +40,8 @@ class ChemicalNetwork(object):
 
         self.isothermal = self.grid.isothermal
         self.include_dm = self.grid.include_dm
+        if self.include_dm:
+            self.scattering_off_neutrals = self.grid.scattering_off_neutrals
         self.secondary_ionization = self.grid.secondary_ionization
         
         # For convenience 

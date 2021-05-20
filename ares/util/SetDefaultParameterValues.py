@@ -69,6 +69,7 @@ def GridParameters():
 
     # For Dark Matter heating
     "include_dm": False,
+    "scattering_off_neutrals": True,
 
     # Line photons
     "include_injected_lya": True,
