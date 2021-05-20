@@ -356,6 +356,10 @@ class Grid(object):
         return self._include_dm
 
     @property
+    def scattering_off_neutrals(self):
+        return self._scattering_off_neutrals
+
+    @property
     def cosm(self):
         if not hasattr(self, '_cosm'):
             if self._cosm_ is None:
@@ -371,8 +375,7 @@ class Grid(object):
 
         self.set_physics(**kwargs)
         self.set_cosmology(**kwargs)
-
-        self.set_chemistry(kwargs['include_He'], kwargs['include_dm'])
+        self.set_chemistry(kwargs['include_He'])
         self.set_density(kwargs['density_units'])
         self.set_ionization(kwargs['initial_ionization'])
         self.set_temperature(kwargs['initial_temperature'])
@@ -396,7 +399,7 @@ class Grid(object):
     def set_physics(self, isothermal=False, compton_scattering=False,
         secondary_ionization=0, expansion=False, recombination='B',
         clumping_factor=1.0, collisional_ionization=True, exotic_heating=False, 
-        **kwargs):
+        include_dm = False, **kwargs):
         self._isothermal = isothermal
         self._compton_scattering = compton_scattering
         self._secondary_ionization = secondary_ionization
@@ -404,7 +407,8 @@ class Grid(object):
         self._recombination = recombination
         self._collisional_ionization = collisional_ionization
         self._exotic_heating = exotic_heating
-
+        self._include_dm = include_dm
+        
         if type(clumping_factor) is not types.FunctionType:
             self._clumping_factor = lambda z: clumping_factor
         else:
@@ -421,6 +425,9 @@ class Grid(object):
             else:
                 self._exotic_func = self.pf['exotic_heating_func']
                 
+        if self._include_dm:
+            self._scattering_off_neutrals = kwargs['scattering_off_neutrals']
+            
             # Set Jacobian element?    
 
     @property
@@ -436,7 +443,7 @@ class Grid(object):
     def set_cosmology(self, **kwargs):
         self.zi = self.pf['initial_redshift']
         
-    def set_chemistry(self, include_He=False, include_dm=False):
+    def set_chemistry(self, include_He=False):
         """
         Initialize chemistry.
         
@@ -469,7 +476,7 @@ class Grid(object):
         self.elements = []       # Just a list of element names
         self.all_ions = []       # All ion species          
         self.evolving_fields = []# Anything with an ODE we'll later solve
-        self._include_dm = include_dm
+        
         for i, element in enumerate(self.Z):
             element_name = util.z2element(element)
                 
@@ -487,7 +494,7 @@ class Grid(object):
         if not self.isothermal:
             self.evolving_fields.append('Tk')
 
-            if include_dm:
+            if self.include_dm:
                 self.evolving_fields.extend(['Tchi', 'Vchib'])
 
         self.fields_key = {k: v for v, k in enumerate(self.evolving_fields)}
