@@ -96,7 +96,6 @@ class ChemicalNetwork(object):
             [cell #, ionization rate coefficient (IRC), secondary IRC,
              photo-heating rate coefficient, particle density, time]
         """       
-    
         self.q = q
 
         cell, k_ion, k_ion2, k_heat, ntot, time = args
@@ -122,10 +121,6 @@ class ChemicalNetwork(object):
         x = {k: q[self.grid.fields_key[k]] for k in self.grid.fields_key}
         n = {'h': n_H, 'he': n_He}
         n_e = x['e'] * n_H
-
-        # print('mean baryon density = {} mean dm density = {}'.format(self.cosm.MeanBaryonDensity(z),self.cosm.MeanDarkMatterDensity(z)))
-        # print(x)
-        # raise Exception 
         xe = n_e / n_H
         
         # In two-zone model, this phase is assumed to be fully ionized
@@ -785,11 +780,8 @@ class ChemicalNetwork(object):
         """
         Tb_, Tchi_, Vchib_ = x['Tk'], x['Tchi'], x['Vchib']  
         n_e = x['e'] * n_H
-
         xe = x['e'] # electron fraction 
         x_h2 =  x['h_2'] # ionized hydrogen fraction 
-        # x_he2 = x['he_2'] # singly ionized helium fraction
-        # x_he3 = x['he_3'] # doubly ionized helium fraction
 
         # Putting everything in natural units with c=h=kb=1...
         Tb = Tb_ * ev_per_K
@@ -804,8 +796,6 @@ class ChemicalNetwork(object):
         mchi = self.cosm.m_dmeff * 1e9  # DM mass [eV]
         mp = m_p * ev_per_g 
         me = m_e * ev_per_g
-        # mHe2 = m_HeII * ev_per_g
-        # mHe3 = (m_HeII- m_e) * ev_per_g
 
         sig = self.cosm.sigma_dmeff / ev_per_cminv**2  # Cross section [eV^-2]
         npow = self.cosm.npow_dmeff
@@ -815,14 +805,10 @@ class ChemicalNetwork(object):
         # Conversion from cgs density to eV^4
         rho_to_ev = ev_per_g * ev_per_cminv**3
         rho_chi = self.cosm.MeanDarkMatterDensity(z) * rho_to_ev
-        # rho_m = self.cosm.MeanMatterDensity(z) * rho_to_ev 
         rho_b = self.cosm.MeanBaryonDensity(z) * rho_to_ev 
         rho_h = self.cosm.MeanHydrogenNumberDensity(z) * m_H * rho_to_ev # Mean hydrogen energy density 
-        # rho_he = self.cosm.MeanHeliumNumberDensity(z) * rho_b # Mean helium energy density
         rho_e = n_e * me * ev_per_cminv**3 # Mean electron energy density
         rho_h2 = x_h2 * rho_h # ionized hydrogen energy density
-        # rho_he3 = x_he3 * rho_he # singly ionized helium energy density
-        # rho_he4 = x_he4 * rho_he # doubly ionized helium energy denisty
         
         uth = np.sqrt(Tb / mb + Tchi / mchi)
         r = Vchib/uth
