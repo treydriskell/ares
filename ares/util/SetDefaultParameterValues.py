@@ -1302,6 +1302,13 @@ def CosmologyParameters():
     "m_dmeff": None,  # Dark Matter mass [GeV]
     "sigma_dmeff": None,  # DM/b cross-section [1/cm^2]
     "npow_dmeff": None,  # Interaction Order
+
+    # CLASS quantities passed to CCL if cosmology_helper is not None
+    
+    "cosmology_background": None,
+    "cosmology_pkln": None,
+    "cosmology_pknl": None,
+    "n_k": 500
     }
 
     pf.update(rcParams)

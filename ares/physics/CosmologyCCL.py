@@ -41,9 +41,10 @@ class CosmologyCCL(CosmologyARES):
 
             # Set background quantities in CCL using class arrays, if cosmology_helper is passed
             # CCL commit 593ed60c required to make this work.
-            else:
-                cl = self.pf['cosmology_helper']
-                bg = cl.get_background()
+            elif self.pf['cosmology_helper'] == 'classy':
+                bg = self.pf['cosmology_background']
+                pkln = self.pf['cosmology_pkln']
+                pknl = self.pf['cosmology_pknl']
 
                 a_bg = 1/(1+bg['z'])
                 # Distances
@@ -56,22 +57,12 @@ class CosmologyCCL(CosmologyARES):
                 growth_factor = bg['gr.fac. D']
                 growth_rate = bg['gr.fac. f']
 
-
                 # Power spectra
-                k_arr = np.logspace(-5, np.log10(self.pf['kmax']), 1000)
+                k_arr = np.logspace(-5, np.log10(self.pf['kmax']), self.pf['n_k']) 
                 nk = len(k_arr)
 
                 z_pk = np.arange(self.pf['hmf_zmin'], self.pf['hmf_zmax'], self.pf['hmf_dz'])
                 a_arr = 1 / (1 + z_pk[::-1])
-
-                # Linear
-                pkln = np.array([[cl.pk_lin(k, 1./a-1)
-                                  for k in k_arr]
-                                 for a in a_arr])
-                # non-linear
-                pknl = np.array([[cl.pk(k, 1./a-1)
-                                  for k in k_arr]
-                                 for a in a_arr])
 
                 cosmo = pyccl.CosmologyCalculator(**ccl_kwargs,
                                     background={'a': a_bg, 'chi': chi, 'h_over_h0': h_over_h0},
@@ -81,10 +72,8 @@ class CosmologyCCL(CosmologyARES):
                                                'delta_matter:delta_matter': pkln},
                                     pk_nonlin={'a': a_arr, 'k': k_arr,
                                                'delta_matter:delta_matter': pknl})
-
-                # # erase classy object for serialization purposes?
-                # self.pf['cosmology_helper'] = 'used'
-
+            else:
+                raise NotImplementedError('cosmology_helper {} not implemented'.format(self.pf['cosmology_helper']))
             self._ccl_instance_ = cosmo
 
 
@@ -110,7 +99,7 @@ class CosmologyCCL(CosmologyARES):
             self._ccl_instance_.cosmo.spline_params.K_MIN = 1e-5
             self._ccl_instance_.cosmo.spline_params.K_MAX = float(self.pf['kmax'])
             self._ccl_instance_.cosmo.spline_params.K_MAX_SPLINE = float(self.pf['kmax'])
-            self._ccl_instance_.cosmo.spline_params.N_K = 1000
+            self._ccl_instance_.cosmo.spline_params.N_K = int(self.pf['n_k']) 
 
             self._ccl_instance.cosmo.spline_params.A_SPLINE_NA = 500
             #self._ccl_instance.cosmo.spline_params.A_SPLINE_MIN_PK = 0.01
