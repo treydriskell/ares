@@ -18,7 +18,7 @@ from scipy.special import erf, gamma, hyp1f1
 from ..util.Warnings import solver_error
 from ..physics.RateCoefficients import RateCoefficients
 from ..physics.Constants import k_B, sigma_T, m_e, c, s_per_myr, erg_per_ev, h, \
-    m_H, m_p, m_HeII, ev_per_g, ev_per_cminv, ev_per_K, ev_per_hz
+    m_H, m_p, m_He, m_HeII, ev_per_g, ev_per_cminv, ev_per_K, ev_per_hz
         
 rad_const = (8. * sigma_T / 3. / m_e / c)
         
@@ -284,19 +284,11 @@ class ChemicalNetwork(object):
             dqdt['Tk'] = 0.0
         
         if self.include_dm and not self.isothermal:
-            if self.scattering_off_neutrals:
-                Tk, Tchi, Vchib = x['Tk'], x['Tchi'], x['Vchib']
-                dTk_dt, dTchi_dt, dVchib_dt = self.dm_heating(z, Tk, Tchi, Vchib)
-                H = self.cosm.HubbleParameter(z)
-                dm_cooling = 2*H*x['Tchi']
-                dqdt['Tchi'] = -dm_cooling + dTchi_dt
-                dqdt['Tk'] += dTk_dt
-                dqdt['Vchib'] = -H*Vchib + dVchib_dt
-            else:
-                dTk_dt, dTchi_dt, dVchib_dt = self.new_dm_heating(z, x, n_H, n_He)
-                dqdt['Tchi'] = dTchi_dt
-                dqdt['Tk'] += dTk_dt
-                dqdt['Vchib'] = dVchib_dt
+            dTk_dt, dTchi_dt, dVchib_dt = self.dm_heating(
+                z, x, self.scattering_off_neutrals)
+            dqdt['Tchi'] = dTchi_dt
+            dqdt['Tk'] += dTk_dt
+            dqdt['Vchib'] = dVchib_dt
 
             if self.isothermal:
                 dqdt['Tchi'] = 0
@@ -693,80 +685,8 @@ class ChemicalNetwork(object):
                 'zeta': self.zeta, 'eta': self.eta, 'psi': self.psi,
                 'xi': self.xi, 'omega': self.omega}
 
-    def dm_heating(self, z, Tb_, Tchi_, Vchib_):
-        """
-        Dark Matter heating differential equations.
-        Equations 16 - 20 of Munoz et al. 2015
 
-        Returns dTb_dt, dTchi_dt, and dVchib_dt components from heating and
-        drag, not including the change due to hubble expansion.
-
-        Parameters
-        ------------
-        z : float
-            redshift.
-        Tb : float
-            baryon temperature [K]
-        Tchi : float
-            Dark matter temp [K]
-        Vchib : float
-            DM-b relative velocity [cm/s]
-        """
-        # Putting everything in natural units with c=h=kb=1...
-        Tb = Tb_ * ev_per_K
-        Tchi = Tchi_ * ev_per_K
-        Vchib = Vchib_ / c
-
-        # Threshold velocity so it doesn't go negative
-        if Vchib < 1e-8:
-            Vchib = 0
-
-        mb = self.cosm.g_per_b * ev_per_g  # Baryon mass [eV]
-        mchi = self.cosm.m_dmeff * 1e9  # DM mass [eV]
-        sig = self.cosm.sigma_dmeff / ev_per_cminv**2  # Cross section [eV^-2]
-        npow = self.cosm.npow_dmeff
-
-        # Conversion from cgs density to eV^4
-        rho_to_ev = ev_per_g * ev_per_cminv**3
-        rho_chi = self.cosm.MeanDarkMatterDensity(z) * rho_to_ev
-        rho_m = self.cosm.MeanMatterDensity(z) * rho_to_ev
-        rho_b = self.cosm.MeanBaryonDensity(z) * rho_to_ev
-
-        uth = np.sqrt(Tb / mb + Tchi / mchi)
-        r = Vchib/uth
-        F = erf(r / np.sqrt(2)) - np.sqrt(2 / np.pi) * np.exp(-r ** 2 / 2) * r
-        drag = rho_m * sig * F / (mb + mchi) / Vchib ** 2
-
-        if Vchib == 0:
-            drag = 0
-
-        dQb_dt = 2 * mb * rho_chi * sig * (Tchi - Tb) * np.exp(-r ** 2 / 2) \
-                 / (mchi + mb) ** 2 / np.sqrt(2 * np.pi) / uth ** 3         \
-                 + rho_chi / rho_m * (mchi * mb) / (mchi + mb) * Vchib * drag
-
-        dQchi_dt = 2 * mchi * rho_b * sig * (Tb - Tchi) * np.exp(-r**2/2) \
-                   / (mchi + mb) ** 2 / np.sqrt(2 * np.pi) / uth ** 3     \
-                   + rho_b / rho_m * (mchi * mb) / (mchi + mb) * Vchib * drag
-
-        # Equations 18 - 20 of munoz et al.
-        dTchi_dt_ = 2./3. * dQchi_dt  # [eV^2]
-        dTb_dt_ = 2/3 * dQb_dt  # [eV^2]
-        dVchib_dt_ = -drag  # [eV]
-
-        # Converts back to cgs
-        dTchi_dt = dTchi_dt_ / ev_per_K / ev_per_hz  # [K/s]
-        dTb_dt = dTb_dt_ / ev_per_K / ev_per_hz  # [K/s]
-        dVchib_dt = dVchib_dt_ * c / ev_per_hz  # [(cm/s) / s]
-
-        if np.isnan(np.array([dTb_dt, dTchi_dt, dVchib_dt])).any():
-            import pdb
-            pdb.set_trace()
-            print("NAN")
-
-        return dTb_dt, dTchi_dt, dVchib_dt
-
-    def new_dm_heating(self, z, x, n_H, n_He):
-
+    def dm_heating(self, z, x, neutral_scattering=False):
         """
         Dark Matter heating differential equations.
         Equations 1 - 4 of Kovetz et al. 2018
@@ -775,82 +695,104 @@ class ChemicalNetwork(object):
         ------------
         z : float
             redshift.
-        x : 
-
+        x: dictionary
+            dictionary of dependent variables
+        n_H: float
+            hydrogen number density
+        n_He: float
+            helium number density
+        neutral_scattering: bool
+            flag for including scattering off neutral targets (default: False) 
         """
-        Tb_, Tchi_, Vchib_ = x['Tk'], x['Tchi'], x['Vchib']  
-        n_e = x['e'] * n_H
-        xe = x['e'] # electron fraction 
+        x_e = x['e'] # electron fraction 
         x_h2 =  x['h_2'] # ionized hydrogen fraction 
+        if self.include_He:
+            x_he2 = x['he_2'] # singly ionized helium
+            x_he3 = x['he_3'] # doubly ionized helium
 
         # Putting everything in natural units with c=h=kb=1...
-        Tb = Tb_ * ev_per_K
-        Tchi = Tchi_ * ev_per_K
-        Vchib = Vchib_ / c
+        T_b = x['Tk'] * ev_per_K
+        T_chi = x['Tchi'] * ev_per_K
+        V_chib = x['Vchib'] / c
 
         # Threshold velocity so it doesn't go negative
-        if Vchib < 1e-8:
-            Vchib = 0
+        if V_chib < 1e-12:
+            V_chib = 0
 
-        mb = self.cosm.g_per_b * ev_per_g  # Baryon mass [eV]
-        mchi = self.cosm.m_dmeff * 1e9  # DM mass [eV]
-        mp = m_p * ev_per_g 
-        me = m_e * ev_per_g
-
-        sig = self.cosm.sigma_dmeff / ev_per_cminv**2  # Cross section [eV^-2]
+        sigma_0 = self.cosm.sigma_dmeff / ev_per_cminv**2  # Cross section [eV^-2]
         npow = self.cosm.npow_dmeff
-        fchi = 1 # Fraction of interacting DM (1 for now)
+        f_chi = 1 # Fraction of interacting DM (f_chi != 1 not yet implemented)
         H = self.cosm.HubbleParameter(z)
 
+        # Convert masses to eV
+        m_b = self.cosm.g_per_b * ev_per_g  # Baryon mass [eV]
+        m_chi = self.cosm.m_dmeff * 1e9  # DM mass [eV]
+        mp = m_p * ev_per_g 
+        me = m_e * ev_per_g
+        if self.include_He:
+            m_he2 = m_HeII * ev_per_g
+            m_he3 = m_HeII * ev_per_g - m_e
+
         # Conversion from cgs density to eV^4
+        n_H = self.cosm.MeanHydrogenNumberDensity(z)
+        n_He = self.cosm.MeanHeliumNumberDensity(z)
         rho_to_ev = ev_per_g * ev_per_cminv**3
         rho_chi = self.cosm.MeanDarkMatterDensity(z) * rho_to_ev
         rho_b = self.cosm.MeanBaryonDensity(z) * rho_to_ev 
-        rho_h = self.cosm.MeanHydrogenNumberDensity(z) * m_H * rho_to_ev # Mean hydrogen energy density 
-        rho_e = n_e * me * ev_per_cminv**3 # Mean electron energy density
-        rho_h2 = x_h2 * rho_h # ionized hydrogen energy density
+        rho_e = x_e * n_H * me * ev_per_cminv**3 
+        rho_h2 = x_h2 * n_H * mp * ev_per_cminv**3 
+        if self.include_He:
+            rho_he2 = x_he2 * n_He * m_he2 * ev_per_cminv**3 
+            rho_he3 = x_he3 * n_He * m_he3 * ev_per_cminv**3
         
-        uth = np.sqrt(Tb / mb + Tchi / mchi)
-        r = Vchib/uth
-        F = erf(r / np.sqrt(2)) - np.sqrt(2 / np.pi) * np.exp(-r ** 2 / 2) * r
-        
-        if Vchib == 0:
-            dVchib_dt_ = 0
+        def dVchib_dt_per_target(m_t, rho_t, u_chit, r_t, F_t):
+            if V_chib > 0:
+                return (-(1 + f_chi * rho_chi / rho_b) * rho_t * sigma_0 
+                * F_t / (m_t + m_chi) / (V_chib**2))
+            else: 
+                return 0.0
 
-            dTchi_dt_ = 2.0 / 3.0 * mchi * sig / uth**3 * (rho_h2 / (mchi + mp)**2  \
-                * np.sqrt(2/np.pi) * (Tb - Tchi) * np.exp(-r**2 / 2) + rho_e/(mchi+me)**2 \
-                * (np.sqrt(2/np.pi) * (Tb - Tchi) * np.exp(-r**2 / 2)))
+        def dTchi_dt_per_target(m_t, rho_t, u_chit, r_t, F_t):
+            if V_chib > 0:
+                return (2.0 * m_chi * rho_t * sigma_0 / 3.0 / (u_chit**3) 
+                    / (m_chi + m_t)**2 * (np.sqrt(2.0/np.pi) * (T_b - T_chi) 
+                    * np.exp(-(r_t**2) / 2.0) + m_t * (V_chib**2) / (r_t**3) * F_t))
+            else:
+                return (2.0 * m_chi * rho_t * sigma_0 / 3.0 / (u_chit**3) 
+                    / (m_chi + m_t)**2 * (np.sqrt(2/np.pi) * (T_b - T_chi) 
+                    * np.exp(-(r_t**2) / 2.0)))
 
-            dTb_dt_ = 2.0 / 3.0 * fchi * rho_chi * sig / ((n_H + n_He + n_e)* ev_per_cminv**3) / uth**3 \
-                * (rho_h2 / (mchi + mp)**2 * (np.sqrt(2/np.pi) * (Tchi - Tb) * np.exp(-r**2 / 2)) \
-                + rho_e / (mchi + me)**2 * (np.sqrt(2/np.pi) * (Tchi - Tb) * np.exp(-r**2 / 2)))
+        def dTb_dt_per_target(m_t, rho_t, u_chit, r_t, F_t):
+            if V_chib > 0:
+                return (2.0 * f_chi * rho_t * rho_chi * sigma_0 / 3.0 / (u_chit**3) 
+                    / ((n_H+n_He+x_e*n_H) * ev_per_cminv**3) / (m_chi + m_t)**2
+                    * (np.sqrt(2.0/np.pi) * (T_chi-T_b) * np.exp(-(r_t**2) / 2.0) 
+                    + m_chi * (V_chib**2) / (r_t**3) * F_t))
+            else:
+                return (2.0 * f_chi * rho_chi * rho_t * sigma_0 / 3.0 / (u_chit**3) 
+                    / (m_chi + m_t)**2 / ((n_H+n_He+x_e*n_H) * ev_per_cminv**3) * (np.sqrt(2.0/np.pi) 
+                    * (T_chi-T_b) * np.exp(-(r_t**2) / 2.0)))
+
+        if neutral_scattering:
+            targets = [(m_b, rho_b)]
         else:
-            dVchib_dt_ = -(1 + fchi * rho_chi / rho_b) * sig * F * \
-                (rho_h2 / (mp + mchi) + rho_e / (me+mchi) ) / Vchib ** 2  
-
-            dTchi_dt_ = 2.0 / 3.0 * mchi * sig / uth**3 * ((rho_h2 / (mchi + mp)**2  \
-                * (np.sqrt(2/np.pi) * (Tb - Tchi) * np.exp(-r**2 / 2) \
-                + mp * Vchib**2 / r**3 * F)) + (rho_e/(mchi+me)**2 \
-                * (np.sqrt(2/np.pi) * (Tb - Tchi) * np.exp(-r**2 / 2) \
-                + me * Vchib**2 / r**3 * F)))
-
-            dTb_dt_ = 2.0 / 3.0 * fchi * rho_chi * sig / ((n_H + n_He + n_e)* ev_per_cminv**3) / uth**3 \
-                * ((rho_h2 / (mchi + mp)**2 * (np.sqrt(2/np.pi) * (Tchi - Tb) * np.exp(-r**2 / 2) \
-                + mchi * Vchib**2 / r**3 * F)) + (rho_e / (mchi + me)**2 \
-                * (np.sqrt(2/np.pi) * (Tchi - Tb) * np.exp(-r**2 / 2) \
-                + mchi * Vchib**2 / r**3 * F)))
-        
+            if self.include_He:
+                targets = [(mp, rho_h2), (me, rho_e), (m_he2, rho_he2), (m_he3, rho_he3)]
+            else:
+                targets = [(mp, rho_h2), (me, rho_e)]
+        dVchib_dt_ = 0.0
+        dTchi_dt_ = 0.0
+        dTb_dt_ = 0.0
+        for m_t, rho_t in targets:
+            u_chit = np.sqrt(T_b / m_t + T_chi / m_chi)
+            r_t = V_chib/u_chit
+            F_t = (erf(r_t / np.sqrt(2.0)) - np.sqrt(2.0 / np.pi) 
+                * r_t * np.exp(-(r_t**2) / 2.0))
+            dVchib_dt_ += dVchib_dt_per_target(m_t, rho_t, u_chit, r_t, F_t)
+            dTchi_dt_ += dTchi_dt_per_target(m_t, rho_t, u_chit, r_t, F_t)
+            dTb_dt_ += dTb_dt_per_target(m_t, rho_t, u_chit, r_t, F_t)
         # Converts back to cgs
-        dTchi_dt = -2 * H * Tchi_ + dTchi_dt_ / ev_per_K / ev_per_hz  # [K/s]
-        dTb_dt = dTb_dt_ / ev_per_K / ev_per_hz  # [K/s]
-        dVchib_dt = -H * Vchib_ + dVchib_dt_ * c / ev_per_hz  # [(cm/s) / s]
-
-        if np.isnan(np.array([dTb_dt, dTchi_dt, dVchib_dt])).any():
-            # import pdb
-            # pdb.set_trace()
-            # print("NAN")
-            print("dTb_dt is nan: " + str(np.isnan(dTb_dt)))
-            print("dTchi_dt is nan: "+ str(np.isnan(dTchi_dt)))
-            print("dVchi_dt is nan: "+ str(np.isnan(dVchib_dt)))
-
+        dTchi_dt = -2 * H * (T_chi / ev_per_K) + dTchi_dt_ / ev_per_K / ev_per_hz
+        dTb_dt = dTb_dt_ / ev_per_K / ev_per_hz
+        dVchib_dt = -H * (V_chib * c) + dVchib_dt_ * c / ev_per_hz
         return dTb_dt, dTchi_dt, dVchib_dt

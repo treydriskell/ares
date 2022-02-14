@@ -147,7 +147,9 @@ class HaloMassFunction(object):
         self.tab_name = self.pf["hmf_table"]
         self.hmf_func = self.pf['hmf_model']
         self.hmf_analytic = self.pf['hmf_analytic']
-
+        #print('hmf called')
+        #print('package = ' + self.pf['hmf_package'] + ' tab_name = ' + self.pf['hmf_table'])
+        
         # Verify that Tmax is set correctly
         #if self.pf['pop_Tmax'] is not None:
         #    if self.pf['pop_Tmin'] is not None and self.pf['pop_Mmin'] is None:
@@ -374,9 +376,13 @@ class HaloMassFunction(object):
 
     def _load_hmf(self):
         """ Load table from HDF5 or binary. """
-
+        print('loading and hmf package is ' + str(self.pf['hmf_package']))
         if self._is_loaded:
             return
+
+        if str(self.pf['hmf_package']) == 'galacticus':
+            print('loading galacticus hmf')
+            return self._load_galacticus_hmf()
 
         if self.pf['hmf_wdm_mass'] is not None:
             return self._load_hmf_wdm()
@@ -512,6 +518,38 @@ class HaloMassFunction(object):
             # Reset fcoll
             if hasattr(self, '_tab_fcoll'):
                 del self._tab_fcoll
+
+    # TODO: TEMP, INTEGRATE WITH LOAD HMF EVENETUALLY
+    def _load_galacticus_hmf(self):
+        zmin, zmax, dz = self.pf['hmf_zmin'], self.pf['hmf_zmax'], self.pf['hmf_dz']
+        self.tab_z = np.arange(zmin, zmax + dz/2.0, dz)
+        for i,z in enumerate(self.tab_z):
+            tab_file = os.path.join(self.pf['hmf_path'], self.tab_name+f'_z_{z:.4f}_hmf.hdf5')
+            print(tab_file)
+            f = h5py.File(tab_file, 'r')
+            self.tab_M = np.array(f['Outputs/Output1/haloMass'])               
+            if i==0:
+                self.tab_dndm = np.zeros((len(self.tab_z), len(self.tab_M)))
+                self.tab_mgtm = np.zeros_like(self.tab_dndm)
+                self.tab_ngtm = np.zeros_like(self.tab_dndm) 
+            self.tab_dndm[i,:] = np.array(f['Outputs/Output1/haloMassFunctionM'])
+            self.tab_ngtm[i,:] = np.array(f['Outputs/Output1/haloMassFunctionCumulative'])
+            mgtm_0 = np.trapz(self.tab_dndm[i] * self.tab_M**2,
+                    x=np.log(self.tab_M))
+            self.tab_mgtm[i,:] = mgtm_0 \
+                - cumtrapz(self.tab_dndm[i] * self.tab_M**2,
+                    x=np.log(self.tab_M), initial=0.0)
+            if i !=1200:
+                f.close()
+        self.tab_growth = np.array(f['Outputs/Output1/growthFactor'])
+        self.tab_k_lin = np.array(f['Outputs/Output1/wavenumber'])
+        self.tab_sigma = np.array(f['Outputs/Output1/sigma'])
+        self.tab_ps_lin = np.array(f['Outputs/Output1/powerSpectrum'])
+        self.tab_mgtm = np.maximum(self.tab_mgtm, 1e-70)
+        self.tab_ngtm = np.maximum(self.tab_mgtm, 1e-70)
+        self._is_loaded = True
+        f.close()
+
 
     @property
     def pars_cosmo(self):
@@ -727,7 +765,7 @@ class HaloMassFunction(object):
         # Masses in hmf are really Msun / h
         if self.pf['hmf_package'] == 'hmf':
             if hmf_vers < Version('3'):
-                self.tab_M = self._MF.M / self.cosm.h70
+                self.tab_M = self._MF.m / self.cosm.h70
             else:
                 self.tab_M = self._MF.m / self.cosm.h70
         else:

@@ -35,11 +35,11 @@ def Cosmology(**kwargs):
     if 'cosmology_package' not in kwargs:
         return CosmologyARES(**kwargs)
     else:
-        if kwargs['cosmology_package'] in [None, 'ares']:
-            return CosmologyARES(**kwargs)
-        else:
+        if kwargs['cosmology_package'] == 'ccl':
             from .CosmologyCCL import CosmologyCCL
             return CosmologyCCL(**kwargs)
+        else:
+            return CosmologyARES(**kwargs)
 
 class CosmologyARES(InitialConditions):
     def __init__(self, pf=None, **kwargs):
