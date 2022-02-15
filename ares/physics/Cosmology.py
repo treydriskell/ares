@@ -11,6 +11,7 @@ Description:
 """
 import os
 import numpy as np
+from ..data import ARES
 from scipy.misc import derivative
 from scipy.optimize import fsolve
 from scipy.integrate import quad, ode
@@ -19,7 +20,6 @@ from ..util.ParameterFile import ParameterFile
 from .InitialConditions import InitialConditions
 from .Constants import c, G, km_per_mpc, m_H, m_He, sigma_SB, g_per_msun, \
     cm_per_mpc, cm_per_kpc, k_B, m_p
-from functools import lru_cache
 
 _ares_to_planck = \
 {
@@ -31,17 +31,7 @@ _ares_to_planck = \
  'primordial_index': 'ns',
 }
 
-def Cosmology(**kwargs):
-    if 'cosmology_package' not in kwargs:
-        return CosmologyARES(**kwargs)
-    else:
-        if kwargs['cosmology_package'] == 'ccl':
-            from .CosmologyCCL import CosmologyCCL
-            return CosmologyCCL(**kwargs)
-        else:
-            return CosmologyARES(**kwargs)
-
-class CosmologyARES(InitialConditions):
+class Cosmology(object):
     def __init__(self, pf=None, **kwargs):
         if pf is not None:
             self.pf = pf
@@ -125,6 +115,13 @@ class CosmologyARES(InitialConditions):
         # 'sigma_8':self.sigma8,
         # 'n': self.primordial_index}
 
+    @property
+    def _ics(self):
+        if not hasattr(self, '_ics_'):
+            self._ics_ = InitialConditions(pf=self.pf)
+            self._ics_.prefix = self.get_prefix()
+        return self._ics_
+
     def nH(self, z):
         return self.nH0 * (1. + z)**3
 
@@ -141,7 +138,7 @@ class CosmologyARES(InitialConditions):
     def path_Planck(self):
         if not hasattr(self, '_path_Planck'):
             name = self.pf['cosmology_name'].replace('planck_', '')
-            self._path_Planck = self.path_ARES \
+            self._path_Planck = ARES \
                  + '/input/planck/base/plikHM_{}'.format(name)
         return self._path_Planck
 
@@ -197,7 +194,11 @@ class CosmologyARES(InitialConditions):
         else:
 
             num = self.pf['cosmology_id']
-            assert type(num) in [int, np.int32, np.int64]
+
+            if type(num) not in [int, np.int32, np.int64]:
+                if self.pf['verbose']:
+                    print("# WARNING: Casting cosmology_id {} to int.".format(num))
+                num = int(num)
 
             ##
             # Load chains as one long concatenated super-array
@@ -260,7 +261,7 @@ class CosmologyARES(InitialConditions):
                 s = "# Set cosmological parameters to values in {}th element of".format(num)
                 s += " concatenated array made from the following files:"
                 print(s)
-                path_str = path.replace(self.path_ARES, '$ARES')
+                path_str = path.replace(ARES, '$ARES')
                 print("# {}_{}_?.txt".format(path_str, prefix))
 
         return
@@ -273,9 +274,13 @@ class CosmologyARES(InitialConditions):
         elif type(self.pf['cosmology_id']) == str:
             name += '_' + self.pf['cosmology_id']
         else:
-            assert type(self.pf['cosmology_id']) in [int, np.int32, np.int64]
+            num = self.pf['cosmology_id']
+            if type(num) not in [int, np.int32, np.int64]:
+                if self.pf['verbose']:
+                    print("# WARNING: Casting `cosmology_id` {} to int.".format(num))
+                num = int(num)
 
-            name += '_{}'.format(str(self.pf['cosmology_id']).zfill(5))
+            name += '_{}'.format(str(num).zfill(5))
 
         return name
 
@@ -537,59 +542,44 @@ class CosmologyARES(InitialConditions):
     def EvolutionFunction(self, z):
         return self.omega_m_0 * (1.0 + z)**3  + self.omega_l_0
 
-    # @lru_cache(maxsize = 100)
     def HubbleParameter(self, z):
         if self.approx_highz:
             return self.hubble_0 * np.sqrt(self.omega_m_0) * (1. + z)**1.5
         return self.hubble_0 * np.sqrt(self.EvolutionFunction(z))
 
-    # @lru_cache(maxsize = 100)
     def HubbleLength(self, z):
         return c / self.HubbleParameter(z)
 
-    # @lru_cache(maxsize = 100)
     def HubbleTime(self, z):
         return 1. / self.HubbleParameter(z)
 
-    # @lru_cache(maxsize = 100)
     def OmegaMatter(self, z):
         if self.approx_highz:
             return 1.0
         return self.omega_m_0 * (1. + z)**3 / self.EvolutionFunction(z)
 
-    # @lru_cache(maxsize = 100)
     def OmegaLambda(self, z):
         if self.approx_highz:
             return 0.0
 
         return self.omega_l_0 / self.EvolutionFunction(z)
 
-    # @lru_cache(maxsize = 100)
     def MeanMatterDensity(self, z):
         return self.OmegaMatter(z) * self.CriticalDensity(z)
 
-    # @lru_cache(maxsize = 100)
-    def MeanDarkMatterDensity(self, z):
-        return (self.omega_cdm_0 / self.omega_m_0) * self.MeanMatterDensity(z)
-
-    # @lru_cache(maxsize = 100)
     def MeanBaryonDensity(self, z):
         return (self.omega_b_0 / self.omega_m_0) * self.MeanMatterDensity(z)
 
-    # @lru_cache(maxsize = 100)
     def MeanHydrogenNumberDensity(self, z):
         return (1. - self.Y) * self.MeanBaryonDensity(z) / m_H
 
-    # @lru_cache(maxsize = 100)
     def MeanHeliumNumberDensity(self, z):
         return self.Y * self.MeanBaryonDensity(z) / m_He
 
-    # @lru_cache(maxsize = 100)
     def MeanBaryonNumberDensity(self, z):
         return self.MeanBaryonDensity(z) / (m_H * self.MeanHydrogenNumberDensity(z) +
             4. * m_H * self.y * self.MeanHeliumNumberDensity(z))
 
-    # @lru_cache(maxsize = 100)
     def CriticalDensity(self, z):
         return (3.0 * self.HubbleParameter(z)**2) / (8.0 * np.pi * G)
 
@@ -678,8 +668,8 @@ class CosmologyARES(InitialConditions):
 
     def ProjectedVolume(self, z, angle, dz=1.):
         """
-        Compute the co-moving volume of a spherical shell of `area` and
-        thickness `dz`.
+        Compute the co-moving volume of a spherical shell defined by `angle`
+        and thickness `dz`.
 
         Parameters
         ----------
@@ -696,11 +686,7 @@ class CosmologyARES(InitialConditions):
 
         """
 
-        d_cm = self.ComovingRadialDistance(0., z)
-        angle_rad = (np.pi / 180.) * angle
-
-        dA = angle_rad * d_cm
-
+        dA = self.AngleToComovingLength(z, angle * 60.) * cm_per_mpc
         dldz = quad(self.ComovingLineElement, z-0.5*dz, z+0.5*dz)[0]
 
         return dA**2 * dldz / cm_per_mpc**3
@@ -744,7 +730,7 @@ class CosmologyARES(InitialConditions):
 
         """
 
-        d = self.LuminosityDistance(z) / (1. + z)**2# cm
+        d = self.LuminosityDistance(z) / (1. + z)**2 # cm
 
         in_rad = (angle / 60.) * np.pi / 180.
 

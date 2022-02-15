@@ -68,17 +68,6 @@ def Gauss1D(x, pars):
     """
     return pars[0] + pars[1] * np.exp(-(x - pars[2])**2 / 2. / pars[3])
 
-def GaussND(x, mu, cov):
-    """
-    Return value of multi-variate Gaussian at point x (same shape as mu).
-    """
-    N = len(x)
-    norm = 1. / np.sqrt((2. * np.pi)**N * np.linalg.det(cov))
-    icov = np.linalg.inv(cov)
-    score = np.dot(np.dot((x - mu).T, icov), (x - mu))
-
-    return norm * np.exp(-0.5 * score)
-
 def get_nu(sigma, nu_in, nu_out):
 
     if nu_in == nu_out:
@@ -374,15 +363,19 @@ def quantify_scatter(x, y, xbin_c, weights=None, inclusive=False,
             have_weights = True
 
     if not have_weights:
-        print("Deferring to scipy.stats.binned_statistic since weights=None.")
 
-        assert method_std == 'std'
-        assert method_avg == 'avg'
-        yavg, _b, binid = binned_statistic(x, y, statistic='mean', bins=xbin_e)
-        ysca, _b, binid = binned_statistic(x, y, statistic='std', bins=xbin_e)
-        N, _b, binid = binned_statistic(x, y, statistic='count', bins=xbin_e)
+        if method_std in ['std', 'sum'] and method_avg == 'avg':
 
-        return xbin_c, yavg, ysca, N
+            print("Deferring to scipy.stats.binned_statistic since weights=None.")
+
+            yavg, _b, binid = binned_statistic(x, y, statistic='mean',
+                bins=xbin_e)
+            ysca, _b, binid = binned_statistic(x, y, statistic=method_std,
+                bins=xbin_e)
+            N, _b, binid = binned_statistic(x, y, statistic='count',
+                bins=xbin_e)
+
+            return xbin_c, yavg, ysca, N
 
     ysca = []
     yavg = []
@@ -413,6 +406,8 @@ def quantify_scatter(x, y, xbin_c, weights=None, inclusive=False,
             yavg.append(-np.inf)
             if method_std == 'bounds' or type(method_std) in [int, float, np.float64]:
                 ysca.append((-np.inf, -np.inf))
+            elif type(method_std) in [list, tuple]:
+                ysca.append((-np.inf, -np.inf))
             else:
                 ysca.append(-np.inf)
 
@@ -424,10 +419,21 @@ def quantify_scatter(x, y, xbin_c, weights=None, inclusive=False,
         # and some measure of the scatter.
         N.append(sum(ok==1))
 
-        yavg.append(np.average(f, weights=weights[ok==1]))
+        if method_avg == 'avg':
+            yavg.append(np.average(f, weights=weights[ok==1]))
+        elif method_avg == 'median':
+            # Weighted median -> use cdf of weights, convert to y-value after.
+            # First: rank-order in y value.
+            ix = np.argsort(f)
+            cdf = np.cumsum(weights[ok==1][ix]) / np.sum(weights[ok==1][ix])
+            yavg.append(f[ix][np.argmin(np.abs(cdf - 0.5))])
+        else:
+            raise NotImplemented("Haven't implemented method_avg={} in this case!".format(method_avg))
 
         if method_std == 'std':
             ysca.append(np.std(f))
+        elif method_std == 'sum':
+            ysca.append(np.sum(f * weights[ok==1]))
         elif method_std in _dist_opts:
 
             if method_std.startswith('lognormal'):
@@ -489,6 +495,11 @@ def quantify_scatter(x, y, xbin_c, weights=None, inclusive=False,
         elif type(method_std) in [int, float, np.float64]:
             q1 = 0.5 * 100 * (1. - method_std)
             q2 = 100 * method_std + q1
+            lo, hi = np.percentile(f, (q1, q2))
+            ysca.append((lo, hi))
+        elif type(method_std) in [list, tuple]:
+            q1 = 100 * method_std[0]
+            q2 = 100 * method_std[1]
             lo, hi = np.percentile(f, (q1, q2))
             ysca.append((lo, hi))
         else:

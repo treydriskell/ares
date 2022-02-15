@@ -26,7 +26,7 @@ from ..analysis import ModelSet
 from ..analysis.BlobFactory import BlobFactory
 from ..sources import BlackHole, SynthesisModel
 from ..analysis.TurningPoints import TurningPoints
-from ..util.Stats import Gauss1D, GaussND, get_nu, bin_e2c
+from ..util.Stats import Gauss1D, get_nu, bin_e2c
 from ..util.Pickling import read_pickle_file, write_pickle_file
 from ..util.SetDefaultParameterValues import _blob_names, _blob_redshifts
 from ..util.ReadData import flatten_chain, flatten_logL, flatten_blobs, \
@@ -45,7 +45,7 @@ from ..util.ReadData import flatten_chain, flatten_logL, flatten_blobs, \
 #        f.write("{} {} {} {}\n".format(t, mem, rank, checkpt))
 
 try:
-    from distpy import DistributionSet
+    from distpy.distribution import DistributionSet
 except ImportError:
     pass
 
@@ -1674,7 +1674,7 @@ class ModelFit(FitBase):
             print("# Checkpoint #{0}: {1!s}".format(ct // save_freq,
                 time.ctime()))
         else:
-            print("# Wrote {0!s}: {1!s}".format(fn_facc, time.ctime()))
+            print("# Wrote {0!s}*.pkl: {1!s}".format(prefix, time.ctime()))
 
         ##################################################################
         write_pickle_file(data[-1], '{!s}.rstate.pkl'.format(prefix),\

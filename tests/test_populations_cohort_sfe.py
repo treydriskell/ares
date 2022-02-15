@@ -6,13 +6,12 @@ Author: Jordan Mirocha
 Affiliation: UCLA
 Created on: Wed Jun 15 15:47:03 PDT 2016
 
-Description: 
+Description:
 
 """
 
 import ares
 import numpy as np
-import matplotlib.pyplot as pl
 
 pars_pl = \
 {
@@ -108,70 +107,81 @@ pars_dpl_Nofz = \
 'pq_func_par6[0]': 1.,
 }
 
-
 def test():
-    
+
     Mh = np.logspace(7, 15, 200)
-    
+
     ls = '-', '--', ':', '-.'
     lw = 2, 2, 4, 4
     labels = ['pl_w_ceil', 'dpl', 'pwpl', 'ramp']
     for i, pars in enumerate([pars_pl, pars_dpl, pars_pwpl, pars_ramp]):
         pop = ares.populations.GalaxyPopulation(pop_sfr_model='sfe-func', **pars)
-        
-        fnow = pop.SFE(z=6., Mh=Mh).copy()
-        
-        pl.loglog(Mh, fnow, ls=ls[i], label=labels[i], lw=lw[i])
-            
+
+        fnow = pop.get_sfe(z=6., Mh=Mh).copy()
+
         if (i > 0) and (labels[i] != 'ramp'):
             assert np.allclose(fnow[Mh <= 1e8], fprev[Mh <= 1e8], rtol=5e-2)
             assert np.allclose(fnow[Mh >= 1e14], fprev[Mh >= 1e14], rtol=5e-2)
-    
+
         fprev = fnow.copy()
-    
-    pl.xlabel(r'$M_h / M_{\odot}$')
-    pl.ylabel(r'$f_{\ast}$')
-    pl.ylim(1e-4, 0.2)
-    pl.legend(loc='lower right', fontsize=14)
-    
-    pl.savefig('{!s}_1.png'.format(__file__[0:__file__.rfind('.')]))     
-    pl.close()
-    
-    pop1 = ares.populations.GalaxyPopulation(pop_sfr_model='sfe-func', 
+
+    pop1 = ares.populations.GalaxyPopulation(pop_sfr_model='sfe-func',
         **pars_pl_w_zdep)
-    pop2 = ares.populations.GalaxyPopulation(pop_sfr_model='sfe-func', 
+    pop2 = ares.populations.GalaxyPopulation(pop_sfr_model='sfe-func',
         **pars_dpl_Mofz)
-    pop3 = ares.populations.GalaxyPopulation(pop_sfr_model='sfe-func', 
-        **pars_dpl_Nofz)    
-        
-    colors = ['k', 'b', 'c']
-    ls = ['-', '--', ':']
-    labels = [r'$f_{\ast}(z)$', r'$M_p(z)$', r'$f_{\ast}(z)$']
+    pop3 = ares.populations.GalaxyPopulation(pop_sfr_model='sfe-func',
+        **pars_dpl_Nofz)
+
     all_sfe = []
     for j, pop in enumerate([pop1, pop2, pop3]):
         for i, z in enumerate([6, 10]):
-            sfe = pop.SFE(z=z, Mh=Mh)
-            pl.loglog(Mh, sfe, color=colors[j], ls=ls[i],
-                label=labels[j] if i == 0 else None)
-            
+            sfe = pop.get_sfe(z=z, Mh=Mh)
             all_sfe.append(sfe)
-                            
-    pl.xlabel(r'$M_h / M_{\odot}$')
-    pl.ylabel(r'$f_{\ast}$')
-    pl.ylim(1e-4, 0.2)
-    pl.legend(loc='upper left', fontsize=14)
-    
-    pl.savefig('{!s}_2.png'.format(__file__[0:__file__.rfind('.')]))     
-    pl.close()
-    
+
     assert ~np.all(all_sfe[0] == all_sfe[1]), "No SFE evolution detected!"
     assert ~np.all(all_sfe[2] == all_sfe[3]), "No SFE evolution detected!"
     assert ~np.all(all_sfe[4] == all_sfe[5]), "No SFE evolution detected!"
     assert np.allclose(all_sfe[0][Mh <= 1e10], all_sfe[2][Mh <= 1e10],
         rtol=1e-2, atol=0), "Mismatch at low Mh!"
     assert np.allclose(all_sfe[0][Mh <= 1e10], all_sfe[4][Mh <= 1e10],
-        rtol=1e-2, atol=0), "Mismatch at low Mh!"    
-    
+        rtol=1e-2, atol=0), "Mismatch at low Mh!"
+
+
+    # Test abundance matching
+    pars = ares.util.ParameterBundle('mirocha2017:base').pars_by_pop(0,1)
+    pars.update(ares.util.ParameterBundle('testing:galaxies'))
+    pop = ares.populations.GalaxyPopulation(**pars)
+
+    bins = np.arange(-25, 0, 0.1)
+    def uvlf(MUV, z):
+        mags, phi = pop.get_uvlf(z, bins)
+        return np.interp(MUV, mags, phi)
+
+    pars2 = pars.copy()
+    pars2['pop_sfr_model'] = 'uvlf'
+    pars2['pop_uvlf'] = uvlf
+
+    pop_ham = ares.populations.GalaxyPopulation(**pars2)
+
+    fstar1 = pop.get_sfe(z=6, Mh=Mh)
+    fstar1b = pop.get_fstar(z=6, Mh=Mh)
+    assert np.all(fstar1 == fstar1b)
+
+    fstar2 = pop_ham.run_abundance_match(6, Mh)
+    fstar2b = pop_ham.get_sfe(z=6, Mh=Mh)
+
+    ok = np.logical_and(Mh >= 1e9, Mh <= 1e13)
+
+    assert np.allclose(fstar1[ok==1], fstar2[ok==1], rtol=1e-1)
+
+    # Check tabulated fstar (slow)
+    #fstar2c = pop_ham.tab_fstar[np.argmin(np.abs(6 - pop_ham.halos.tab_z))]
+
+    # Check 21cmFAST parameterization
+    pars_cmfast = ares.util.ParameterBundle('park2019:base').pars_by_pop(0, 1)
+    pop_cmfast = ares.populations.GalaxyPopulation(**pars_cmfast)
+
+    x, phi = pop_cmfast.get_uvlf(6, bins)
+
 if __name__ == '__main__':
     test()
-    

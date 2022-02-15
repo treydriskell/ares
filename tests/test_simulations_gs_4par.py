@@ -6,7 +6,7 @@ Author: Jordan Mirocha
 Affiliation: UCLA
 Created on: Thu Jan 19 10:35:33 PST 2017
 
-Description: 
+Description:
 
 """
 
@@ -14,25 +14,9 @@ import pytest
 
 import ares
 import numpy as np
-import matplotlib.pyplot as pl
 
-
-@pytest.mark.parametrize("cosmology_package", ["ccl", None])
-@pytest.mark.parametrize("initial_redshift", [40, 60, 80])
-@pytest.mark.parametrize("radiative_transfer", [False, True])
-@pytest.mark.parametrize("hmf_package", ["ccl", "hmf"])
-# @pytest.mark.parametrize('check_results', [False, True])
-def test(cosmology_package, initial_redshift, radiative_transfer, hmf_package, check_results=True):
-    if hmf_package == "ccl":
-        if cosmology_package != "ccl":
-            return
-
-    sim = ares.simulations.Global21cm(
-        cosmology_package=cosmology_package,
-        initial_redshift=initial_redshift,
-        radiative_transfer=radiative_transfer,
-        hmf_package=hmf_package,
-    )
+def test():
+    sim = ares.simulations.Global21cm()
 
     sim.info
     pf = sim.pf
@@ -40,20 +24,6 @@ def test(cosmology_package, initial_redshift, radiative_transfer, hmf_package, c
     assert sim.pf.Npops == 3
 
     sim.run()
-    ax, zax = sim.GlobalSignature(fig=0, ymin=-400)
-
-    sim.AdiabaticFloor(ax, color="k", ls=":")
-    sim.AdiabaticFloor(ax)
-
-    sim.SaturatedLimit(ax)
-
-    inset_tau = sim.add_tau_inset(ax)
-    inset_Ts = sim.add_Ts_inset(ax)
-
-    ax1b, zax1b = sim.GlobalSignature(fig=1, ymin=-400, time_ax=True)
-
-    if not radiative_transfer:
-        return
     #
     # Make sure it's not a null signal.
     z = sim.history["z"]
@@ -91,22 +61,9 @@ def test(cosmology_package, initial_redshift, radiative_transfer, hmf_package, c
     curv1 = sim.dTb2dz2
     curv2 = sim.dTb2dnu2
 
-    ax2 = sim.OpticalDepthHistory(fig=2, show_obs=True, obs_mu=0.055, obs_sigma=0.009)
-    ax3 = sim.TemperatureHistory(fig=3)
-    ax3 = sim.TemperatureHistory(ax=ax3, show_Ts=True, show_Tk=False, show_Tcmb=True)
-    ax4 = sim.IonizationHistory(fig=4)
-    ax5 = sim.GlobalSignatureDerivative(fig=5)
-    ax6 = sim.GlobalSignatureDerivative(fig=6, show_signal=True)
+    # Test output
+    sim.save('test_gs_4par', 'pkl', clobber=True)
+    sim.save('test_gs_4par', 'txt', clobber=True)
 
-    sim.save("test_gs_4par", "pkl", clobber=True)
-    sim.save("test_gs_4par", "txt", clobber=True)
-
-    for i in range(0, 6):
-        pl.figure(i)
-        pl.savefig("{0!s}_{1}.png".format(__file__[0 : __file__.rfind(".")], i))
-
-    # pl.close('all')
-
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     test()
