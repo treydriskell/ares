@@ -61,7 +61,6 @@ class ChemicalNetwork(object):
         self.collisional_ionization = self.grid.collisional_ionization
 
         self.Nev = len(self.grid.evolving_fields)
-
         self.include_He = 2 in self.grid.Z
         self.y = self.cosm.y
 
@@ -72,8 +71,27 @@ class ChemicalNetwork(object):
         # Figure out mapping from q vector to things with names
         ##
 
+        if self.include_dm:
+            if self.include_He:
+                if self.isothermal:
+                    self._parse_q = lambda q, n_H: \
+                        ({'h_1': q[0], 'h_2': q[1], 'he_1': q[2], 'he_2': q[3], \
+                            'he_3': q[4]}, {'h': n_H, 'he': self.y * n_H}, \
+                            q[-1] * n_H)
+                else: 
+                    self._parse_q = lambda q, n_H: \
+                        ({'h_1': q[0], 'h_2': q[1], 'he_1': q[2], 'he_2': q[3], \
+                            'he_3': q[4]}, {'h': n_H, 'he': self.y * n_H}, \
+                            q[-4] * n_H)
+            else:
+                if self.isothermal:
+                    self._parse_q = lambda q, n_H: \
+                        ({'h_1': q[0], 'h_2': q[1]}, {'h': n_H}, q[-1]  * n_H)
+                else: 
+                    self._parse_q = lambda q, n_H: \
+                        ({'h_1': q[0], 'h_2': q[1]}, {'h': n_H}, q[-4]  * n_H)
         # Hydrogen-only, isothermal
-        if self.Nev == 3:
+        elif self.Nev == 3:
             self._parse_q = lambda q, n_H: \
                 ({'h_1': q[0], 'h_2': q[1]}, {'h': n_H}, q[2]  * n_H)
 
@@ -158,7 +176,12 @@ class ChemicalNetwork(object):
             CF *= (n_H * (1. + y) / n_e)
 
         # Where do the electrons live?
-        if self.Nev == 6:
+        if self.include_dm:
+            if self.isothermal:
+                e = -1
+            else:
+                e = -4
+        elif self.Nev == 6:
             e = -1
         elif self.Nev == 7:
             e = -2
@@ -292,7 +315,7 @@ class ChemicalNetwork(object):
 
             # Hubble Cooling
             if self.expansion:
-                hubcool = 2. * self.cosm.HubbleParameter(z) * x['Tk']
+                hubcool = 2. * self.cosm.HubbleParameter(z) * q[-1]
 
                 # Compton cooling
                 if self.grid.compton_scattering:
@@ -314,7 +337,7 @@ class ChemicalNetwork(object):
         
         if self.include_dm and not self.isothermal:
             dTk_dt, dTchi_dt, dVchib_dt = self.dm_heating(
-                z, x, self.scattering_off_neutrals)
+                z, x, q, xe, self.scattering_off_neutrals)
             dqdt['Tchi'] = dTchi_dt
             dqdt['Tk'] += dTk_dt
             dqdt['Vchib'] = dVchib_dt
@@ -406,7 +429,12 @@ class ChemicalNetwork(object):
         J = self.zeros_jac.copy()
 
         # Where do the electrons live?
-        if self.Nev == 6:
+        if self.include_dm:
+            if self.isothermal:
+                e = -1
+            else:
+                e = -4
+        elif self.Nev == 6:
             e = -1
         elif self.Nev == 7:
             e = -2
@@ -455,8 +483,9 @@ class ChemicalNetwork(object):
 
         ###
         ## HELIUM INCLUDED CASES: N=6 (isothermal), N=7 (thermal evolution)
+        # N=7 (dm, isothermal), N=9 (dm, thermal evolution)
         ###
-        if self.Nev in [6, 7]:
+        if self.Nev in [6, 7, 8, 9]:
 
             # Secondary ionization
             gamma_HeI = 0.0
@@ -719,7 +748,7 @@ class ChemicalNetwork(object):
                 'zeta': self.zeta, 'eta': self.eta, 'psi': self.psi,
                 'xi': self.xi, 'omega': self.omega}
 
-    def dm_heating(self, z, x, neutral_scattering=False):
+    def dm_heating(self, z, x, q, x_e, neutral_scattering=False):
         """
         Dark Matter heating differential equations.
         Equations 1 - 4 of Kovetz et al. 2018
@@ -737,16 +766,15 @@ class ChemicalNetwork(object):
         neutral_scattering: bool
             flag for including scattering off neutral targets (default: False) 
         """
-        x_e = x['e'] # electron fraction 
         x_h2 =  x['h_2'] # ionized hydrogen fraction 
         if self.include_He:
             x_he2 = x['he_2'] # singly ionized helium
             x_he3 = x['he_3'] # doubly ionized helium
 
         # Putting everything in natural units with c=h=kb=1...
-        T_b = x['Tk'] * ev_per_K
-        T_chi = x['Tchi'] * ev_per_K
-        V_chib = x['Vchib'] / c
+        T_b = q[-1] * ev_per_K
+        T_chi = q[-3] * ev_per_K
+        V_chib = q[-2] / c
 
         # Threshold velocity so it doesn't go negative
         if V_chib < 1e-12:
@@ -770,7 +798,8 @@ class ChemicalNetwork(object):
         n_H = self.cosm.MeanHydrogenNumberDensity(z)
         n_He = self.cosm.MeanHeliumNumberDensity(z)
         rho_to_ev = ev_per_g * ev_per_cminv**3
-        rho_chi = self.cosm.MeanDarkMatterDensity(z) * rho_to_ev
+        rho_chi = (self.cosm.omega_cdm_0 / self.cosm.omega_m_0 * 
+            self.cosm.MeanMatterDensity(z) * rho_to_ev)
         rho_b = self.cosm.MeanBaryonDensity(z) * rho_to_ev 
         rho_e = x_e * n_H * me * ev_per_cminv**3 
         rho_h2 = x_h2 * n_H * mp * ev_per_cminv**3 

@@ -497,12 +497,12 @@ class Grid(object):
                 self.evolving_fields.append(name)
 
         self.solve_ge = False
+
         self.evolving_fields.append('e')
         if not self.isothermal:
-            self.evolving_fields.append('Tk')
-
             if self.include_dm:
                 self.evolving_fields.extend(['Tchi', 'Vchib'])
+            self.evolving_fields.append('Tk')
 
         # Create blank data fields    
         if not hasattr(self, 'data'):            

@@ -224,10 +224,10 @@ class GasParcel(object):
                 **self.rate_coefficients)
 
             t += self.dt
-
+            z = self.cosm.z_of_t(t)
             # Figure out next dt based on max allowed change in evolving fields
             new_dt = self.timestep.Limit(self.chem.q_grid,
-                self.chem.dqdt_grid, method=self.pf['restricted_timestep'])
+                self.chem.dqdt_grid, z=z, method=self.pf['restricted_timestep'])
 
             # Limit timestep further based on next DD and max allowed increase
             dt = min(new_dt, 2 * self.dt)
